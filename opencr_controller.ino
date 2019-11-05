@@ -14,7 +14,7 @@ synkar_msgs::OdometryCompacted odometry2_msg;
 nav_msgs::Odometry odometry_msg;
 
 void callback1(const BaseReceiver & msg) {
-  nh.loginfo("callback1");
+  nh.loginfo("cb1");
   odometry1_msg.x = -1 * msg.left_pos;
   odometry1_msg.y = -1 * msg.right_pos;
   odometry1_msg.yaw = msg.yaw;
@@ -23,7 +23,7 @@ void callback1(const BaseReceiver & msg) {
 }
 
 void callback2(const BaseReceiver & msg) {
-  nh.loginfo("callback2");
+  nh.loginfo("cb2");
   odometry2_msg.x = msg.left_pos;
   odometry2_msg.y = msg.right_pos;
   odometry2_msg.yaw = msg.yaw;
@@ -34,10 +34,10 @@ void callback2(const BaseReceiver & msg) {
 
 
 BaseTransmitter baseTx1(Serial2);
-BaseTransmitter baseTx2(Serial4);
+BaseTransmitter baseTx2(Serial3);
 
 BaseReceiver baseRx1(Serial2, &callback1);
-BaseReceiver baseRx2(Serial4, &callback2);
+BaseReceiver baseRx2(Serial3, &callback2);
 
 void commandVelocityCallback(const geometry_msgs::Twist & msg) {
   baseTx1.left_velocity =  (float)(-1 * (msg.linear.x - msg.angular.z * WHEELBASE / 2));
@@ -67,8 +67,8 @@ void setup() {
   delay(250);
 
 
+  Serial3.begin(57600);
   Serial2.begin(57600);
-  Serial4.begin(57600);
   delay(1000);
   baseTx1.left_velocity = 0.0;
   baseTx1.right_velocity = 0.0;
@@ -77,7 +77,7 @@ void setup() {
 
   setOdomMsgCovariance(odometry_msg.twist.covariance, 0.01);
   odometry_msg.header.frame_id = "odom";
-  odometry_msg.child_frame_id = "base_link";
+  odometry_msg.child_frame_id = "synkar_base_link";
   
   nh.initNode();
   nh.subscribe(cmd_vel_sub);

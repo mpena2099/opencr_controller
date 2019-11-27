@@ -1,35 +1,65 @@
 #include <ros.h>
+#include <std_msgs/UInt16.h>
 #include <geometry_msgs/Twist.h>
-#include <synkar_msgs/OdometryCompacted.h>
 #include <nav_msgs/Odometry.h>
+#include <synkar_base_controller/BatStatus.h>
+#include <synkar_base_controller/BoardStatus.h>
+#include <node_alive/Watchdog.h>
 
 ros::NodeHandle nh;
 
 #include "protocol_opencr.h"
 
 #define WHEELBASE 0.45f
-
-synkar_msgs::OdometryCompacted odometry1_msg;
-synkar_msgs::OdometryCompacted odometry2_msg;
+#define TIME_THRESHOLD 200 //milliseconds
+struct OdometryCompacted {
+  float x;
+  float y;
+  float yaw;
+  float wl;
+  float wr;
+  };
+OdometryCompacted odometry1_msg;
+OdometryCompacted odometry2_msg;
 nav_msgs::Odometry odometry_msg;
+uint16_t battery_voltage;
+
+unsigned long time1_last = 0;
+unsigned long time2_last = 0;
+bool active_status_1 = false;
+bool active_status_2 = false;
 
 void callback1(const BaseReceiver & msg) {
-  nh.loginfo("cb1");
+  //nh.loginfo("cb1");
   odometry1_msg.x = -1 * msg.left_pos;
   odometry1_msg.y = -1 * msg.right_pos;
   odometry1_msg.yaw = msg.yaw;
   odometry1_msg.wl = -1 * msg.left_vel;
   odometry1_msg.wr = -1 * msg.right_vel;
+  time1_last = millis();
 }
 
+
 void callback2(const BaseReceiver & msg) {
-  nh.loginfo("cb2");
+  //nh.loginfo("cb2");
   odometry2_msg.x = msg.left_pos;
   odometry2_msg.y = msg.right_pos;
   odometry2_msg.yaw = msg.yaw;
   odometry2_msg.wl = msg.left_vel;
   odometry2_msg.wr = msg.right_vel;
+  battery_voltage = msg.bat_vel;
+  
+  time2_last = millis();
+  
 }
+void time_spin() {
+  long int time1_current = millis();
+  active_status_1 = ((time1_current - time1_last) < TIME_THRESHOLD);
+  
+  unsigned long time2_current = millis();
+  active_status_2 = ((time2_current - time2_last) < TIME_THRESHOLD);
+}
+
 
 
 
@@ -46,9 +76,80 @@ void commandVelocityCallback(const geometry_msgs::Twist & msg) {
   baseTx2.right_velocity = (float) (msg.linear.x - msg.angular.z * WHEELBASE / 2);
 }
 
+void bat_cb(const synkar_base_controller::BatStatusRequest& req, synkar_base_controller::BatStatusResponse& res) {
+  res.value = ((float) battery_voltage) / 10.0f;
+}
+
+void board1_cb(const synkar_base_controller::BoardStatusRequest& req, synkar_base_controller::BoardStatusResponse& res) {
+  if(!active_status_1) {
+    baseRx1.receive_success_msgs = 0;
+    baseRx1.receive_fail_msgs = 0;
+    battery_voltage = 0;
+  }
+  res.success = baseRx1.receive_success_msgs;
+  res.fail = baseRx1.receive_fail_msgs;
+  res.quality = (float) baseRx1.receive_success_msgs/(baseRx1.receive_fail_msgs + baseRx1.receive_success_msgs);
+  res.active = active_status_1;
+}
+
+void board2_cb(const synkar_base_controller::BoardStatusRequest& req, synkar_base_controller::BoardStatusResponse& res) {
+  if(!active_status_2) {
+    baseRx2.receive_success_msgs = 0;
+    baseRx2.receive_fail_msgs = 0;
+  }
+  res.success = baseRx2.receive_success_msgs;
+  res.fail = baseRx2.receive_fail_msgs;
+  res.quality = (float) baseRx2.receive_success_msgs/(baseRx2.receive_fail_msgs + baseRx2.receive_success_msgs);
+  res.active = active_status_2;
+}
+
+char battery_buff[8];
+char b1_quality_buff[8];
+char b2_quality_buff[8];
+
+void watchdog_cb(node_alive::WatchdogRequest& req, node_alive::WatchdogResponse & res) {
+  
+  dtostrf((((float) battery_voltage) / 10.0f), 4, 1, battery_buff);
+  if((baseRx1.receive_fail_msgs + baseRx1.receive_success_msgs) > 0)
+    dtostrf(((float) baseRx1.receive_success_msgs/(baseRx1.receive_fail_msgs + baseRx1.receive_success_msgs)), 5, 3, b1_quality_buff);
+  else
+    dtostrf(0.0, 5, 3, b1_quality_buff);
+  if((baseRx2.receive_fail_msgs + baseRx2.receive_success_msgs) > 0)
+    dtostrf(((float) baseRx2.receive_success_msgs/(baseRx2.receive_fail_msgs + baseRx2.receive_success_msgs)), 5, 3, b2_quality_buff);
+  else
+    dtostrf(0.0, 5, 3, b2_quality_buff);
+  diagnostic_msgs::KeyValue * dummy = new diagnostic_msgs::KeyValue[6];
+  dummy[0].key = "Board 1 - battery";
+  dummy[0].value = const_cast<char*>(battery_buff);
+  dummy[1].key = "Board 1 - quality";
+  dummy[1].value = const_cast<char*>(b1_quality_buff);
+  dummy[2].key = "Board 1 - active";
+  if(active_status_1)
+    dummy[2].value = "true";
+  else
+    dummy[2].value = "false";
+  dummy[3].key = "Board 2 - battery";
+  dummy[3].value = const_cast<char*>(battery_buff);
+  dummy[4].key = "Board 2 - quality";
+  dummy[4].value = const_cast<char*>(b2_quality_buff);
+  dummy[5].key = "Board 2 - active";
+  if(active_status_2)
+    dummy[5].value = "true";
+  else
+    dummy[5].value = "false";
+      
+  res.watched_values = dummy;
+  res.watched_values_length = 6;
+}
+
 ros::Publisher odometry_msg_pub("odom", &odometry_msg);
 //ros::Publisher odometry2_msg_pub("odom2", &odometry2_msg);
 ros::Subscriber<geometry_msgs::Twist> cmd_vel_sub("cmd_vel", &commandVelocityCallback);
+//ros::Publisher bat_vel_pub("bat_vel", &battery_voltage);
+ros::ServiceServer<synkar_base_controller::BatStatusRequest, synkar_base_controller::BatStatusResponse> bat_service("~battery", &bat_cb);
+ros::ServiceServer<synkar_base_controller::BoardStatusRequest, synkar_base_controller::BoardStatusResponse> board1_service("~board1", &board1_cb);
+ros::ServiceServer<synkar_base_controller::BoardStatusRequest, synkar_base_controller::BoardStatusResponse> board2_service("~board2", &board2_cb);
+ros::ServiceServer<node_alive::WatchdogRequest, node_alive::WatchdogResponse> watchdog_service("~watchdog_srv", watchdog_cb);
 
 void setOdomMsgCovariance(float* cov, float diagonal_value)
 {
@@ -66,7 +167,7 @@ void setup() {
   //  tone(BDPIN_BUZZER, 423, 250);
   delay(250);
 
-
+  
   Serial3.begin(57600);
   Serial2.begin(57600);
   delay(1000);
@@ -82,6 +183,12 @@ void setup() {
   nh.initNode();
   nh.subscribe(cmd_vel_sub);
   nh.advertise(odometry_msg_pub);
+ // nh.advertise(bat_vel_pub);
+  nh.advertiseService<synkar_base_controller::BatStatusRequest, synkar_base_controller::BatStatusResponse>(bat_service);
+  
+  nh.advertiseService<synkar_base_controller::BoardStatusRequest, synkar_base_controller::BoardStatusResponse>(board1_service);
+  nh.advertiseService<synkar_base_controller::BoardStatusRequest, synkar_base_controller::BoardStatusResponse>(board2_service);
+  nh.advertiseService<node_alive::WatchdogRequest, node_alive::WatchdogResponse>(watchdog_service);
 
 }
 int cout = 0;
@@ -118,9 +225,9 @@ void loop() {
       //float theta = (((int) round((odometry1_msg.yaw + odometry2_msg.yaw) * 28.6478897565))%360)*0.01745329251; // (round(((yaw1 + yaw2) / 2)*(180/pi)) mod 360) * (pi/180)
       float const theta = (odometry1_msg.yaw + odometry2_msg.yaw) / 4; //0.6309
       odometry_msg.twist.twist.linear.x = (odometry1_msg.wl + odometry1_msg.wr + odometry2_msg.wl + odometry2_msg.wr) / 4;
-      odometry_msg.twist.twist.angular.z = (odometry1_msg.wr + odometry2_msg.wr - odometry1_msg.wl - odometry2_msg.wl) / ( 2 * WHEELBASE);
-      //odometry_msg.twist.twist.angular.x = left_wheel.velocity;
-      //odometry_msg.twist.twist.angular.y = right_wheel.velocity;
+      odometry_msg.twist.twist.angular.z = (odometry1_msg.wr - odometry2_msg.wr - odometry1_msg.wl + odometry2_msg.wl) / ( 2 * 0.45);
+      //odometry_msg.twist.twist.angular.x = odometry1_msg.wr;
+      //odometry_msg.twist.twist.angular.y = odometry2_msg.wr;
 
 
       odometry_msg.pose.pose.position.x = (odometry1_msg.x + odometry2_msg.x)/2;
@@ -134,7 +241,7 @@ void loop() {
       odometry_msg_pub.publish(&odometry_msg);
     }
     cout = 0;
-    nh.loginfo("-");
+    time_spin();
   }
   baseRx1.spin();
   baseRx2.spin();

@@ -81,9 +81,9 @@ class BaseReceiver {
     typedef float _vel_type;
     typedef float _pos_type;
     typedef float _yaw_type;
-    typedef uint8_t _count_sync_type;
+    typedef uint16_t _bat_vel_type;
 
-    _count_sync_type count_sync;
+    _bat_vel_type bat_vel;
 
     _vel_type left_vel;
     _vel_type right_vel;
@@ -91,7 +91,10 @@ class BaseReceiver {
     _pos_type right_pos;
     _yaw_type yaw;
 
-    BaseReceiver(Stream & serial, CallbackV callbackV) : serial(serial), callbackV(callbackV), left_vel(0), right_vel(0), left_pos(0), right_pos(0), yaw(0) {}
+    uint64_t receive_success_msgs;
+    uint64_t receive_fail_msgs;
+
+    BaseReceiver(Stream & serial, CallbackV callbackV) : receive_success_msgs(0), receive_fail_msgs(0), serial(serial), callbackV(callbackV), bat_vel(0), left_vel(0), right_vel(0), left_pos(0), right_pos(0), yaw(0) {}
 
     int deserialize(unsigned char * inbuffer) {
       union {
@@ -101,11 +104,12 @@ class BaseReceiver {
           float left_pos;
           float right_pos;
           float yaw;
+          uint16_t bat_vel;
         } real;
-        uint8_t base[20];
+        uint8_t base[22];
       } u_data;
 
-      for (int i = 0; i < 20; i++)
+      for (int i = 0; i < 22; i++)
         *(u_data.base + i) = ((*(inbuffer + 2 * i) - 48) << 4) | (*(inbuffer + 2 * i + 1) - 48);
 
       this->left_vel = u_data.real.left_vel;
@@ -113,7 +117,8 @@ class BaseReceiver {
       this->left_pos = u_data.real.left_pos;
       this->right_pos = u_data.real.right_pos;
       this->yaw = u_data.real.yaw;
-      return 40;
+      this->bat_vel = u_data.real.bat_vel;
+      return 44;
     }
     void spin() {
       while (true) {
@@ -131,7 +136,7 @@ class BaseReceiver {
             mode = BYTE_CHK1;
         } else if (mode == BYTE_FIRST) {
           if (data == '#') {
-            size_msg = 40;
+            size_msg = 44;
             index_ = 0;
             mode = BYTE_MESSAGE;
           }
@@ -144,9 +149,10 @@ class BaseReceiver {
 
           if ((chk % 256) == 255) {
             this->deserialize(rx_buffer);
+            receive_success_msgs++;
             callbackV(*this);
           } else {
-            nh.logerror("chk sum");
+            receive_fail_msgs++;
           }
           chk = 0;
         }

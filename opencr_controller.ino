@@ -2,11 +2,13 @@
 #include <std_msgs/UInt16.h>
 #include <geometry_msgs/Twist.h>
 #include <nav_msgs/Odometry.h>
-#include <std_srvs/Empty.h>
-#include <std_srvs/Trigger.h>
-#include <synkar_base_controller/BatStatus.h>
-#include <synkar_base_controller/BoardStatus.h>
-#include <node_alive/Watchdog.h>
+#include <std_msgs/Empty.h>
+#include <std_msgs/Bool.h>
+//#include <std_srvs/Empty.h>
+//#include <std_srvs/Trigger.h>
+//#include <synkar_base_controller/BatStatus.h>
+//#include <synkar_base_controller/BoardStatus.h>
+//#include <node_alive/Watchdog.h>
 
 ros::NodeHandle nh;
 
@@ -80,7 +82,7 @@ void commandVelocityCallback(const geometry_msgs::Twist &msg)
   baseTx2.right_velocity = (float)(msg.linear.x - msg.angular.z * WHEELBASE / 2);
   time_ros_last = millis();
 }
-
+/*
 void bat_cb(const synkar_base_controller::BatStatusRequest &req, synkar_base_controller::BatStatusResponse &res)
 {
   res.value = ((float)battery_voltage) / 10.0f;
@@ -145,11 +147,11 @@ ros::Publisher odometry_msg_pub("odom", &odometry_msg);
 //ros::Publisher odometry2_msg_pub("odom2", &odometry2_msg);
 ros::Subscriber<geometry_msgs::Twist> cmd_vel_sub("cmd_vel", &commandVelocityCallback);
 //ros::Publisher bat_vel_pub("bat_vel", &battery_voltage);
-ros::ServiceServer<synkar_base_controller::BatStatusRequest, synkar_base_controller::BatStatusResponse> bat_service("~battery", &bat_cb);
+/*ros::ServiceServer<synkar_base_controller::BatStatusRequest, synkar_base_controller::BatStatusResponse> bat_service("~battery", &bat_cb);
 ros::ServiceServer<synkar_base_controller::BoardStatusRequest, synkar_base_controller::BoardStatusResponse> board1_service("~board1", &board1_cb);
 ros::ServiceServer<synkar_base_controller::BoardStatusRequest, synkar_base_controller::BoardStatusResponse> board2_service("~board2", &board2_cb);
 //ros::ServiceServer<node_alive::WatchdogRequest, node_alive::WatchdogResponse> watchdog_service("~watchdog_srv", watchdog_cb);
-
+*/
 void setOdomMsgCovariance(float *cov, float diagonal_value)
 {
   for (int i = 0; i < 36; i++)
@@ -163,9 +165,19 @@ void setOdomMsgCovariance(float *cov, float diagonal_value)
 }
 uint32_t chave_time_pressed = 0;
 bool chave_status_pressed = false;
-void chave_cb(const std_srvs::Empty::Request &req, std_srvs::Empty::Response &res)
+
+void chave_cb(const std_msgs::Empty &msg)
 {
-  digitalWrite(3, LOW);
+  digitalWrite(4, LOW);
+  chave_status_pressed = true;
+  chave_time_pressed = millis();
+}
+ros::Subscriber<std_msgs::Empty> chave_sub("key_activate", &chave_cb);
+std_msgs::Bool chave_status_msg;
+ros::Publisher chave_status_pub("key_status", &chave_status_msg);
+/*void chave_cb(const std_srvs::Empty::Request &req, std_srvs::Empty::Response &res)
+{
+  digitalWrite(4, LOW);
   chave_status_pressed = true;
   chave_time_pressed = millis();
 }
@@ -173,10 +185,10 @@ ros::ServiceServer<std_srvs::EmptyRequest, std_srvs::EmptyResponse> chave_servic
 
 void chave_status_cb(const std_srvs::Trigger::Request &req, std_srvs::Trigger::Response &res)
 {
-  res.success = !digitalRead(4);
+  res.success = !digitalRead(3);
   res.message = !res.success ? "opened" : "closed";
 }
-ros::ServiceServer<std_srvs::TriggerRequest, std_srvs::TriggerResponse> chave_status_service("~get_status_key", &chave_status_cb);
+ros::ServiceServer<std_srvs::TriggerRequest, std_srvs::TriggerResponse> chave_status_service("~get_status_key", &chave_status_cb);*/
 void setup()
 {
   //  tone(BDPIN_BUZZER, 423, 250);
@@ -187,10 +199,10 @@ void setup()
   delay(500);
   digitalWrite(50, LOW);
 
-  pinMode(3, OUTPUT);
-  digitalWrite(3, HIGH);
-  pinMode(4, INPUT_PULLUP);
-
+  pinMode(4, OUTPUT);
+  digitalWrite(4, HIGH);
+  pinMode(3, INPUT_PULLUP);
+  Serial.begin(115200);
   Serial3.begin(57600);
   Serial2.begin(57600);
   delay(1000);
@@ -204,26 +216,40 @@ void setup()
   odometry_msg.child_frame_id = "synkar_base_link";
 
   nh.initNode();
-  nh.subscribe(cmd_vel_sub);
+  //nh.subscribe(cmd_vel_sub);
+  //nh.subscribe(chave_sub);
   nh.advertise(odometry_msg_pub);
+  nh.advertise(chave_status_pub);
+  nh.subscribe(cmd_vel_sub);
+  nh.subscribe(chave_sub);
   // nh.advertise(bat_vel_pub);
-  nh.advertiseService<synkar_base_controller::BatStatusRequest, synkar_base_controller::BatStatusResponse>(bat_service);
+  /*nh.advertiseService<synkar_base_controller::BatStatusRequest, synkar_base_controller::BatStatusResponse>(bat_service);
 
   nh.advertiseService<synkar_base_controller::BoardStatusRequest, synkar_base_controller::BoardStatusResponse>(board1_service);
   nh.advertiseService<synkar_base_controller::BoardStatusRequest, synkar_base_controller::BoardStatusResponse>(board2_service);
   //nh.advertiseService<node_alive::WatchdogRequest, node_alive::WatchdogResponse>(watchdog_service);
   nh.advertiseService<std_srvs::EmptyRequest, std_srvs::EmptyResponse>(chave_service);
-  nh.advertiseService<std_srvs::TriggerRequest, std_srvs::TriggerResponse>(chave_status_service);
+  nh.advertiseService<std_srvs::TriggerRequest, std_srvs::TriggerResponse>(chave_status_service);*/
 }
 int cout = 0;
 float time_last_connect = 0;
+uint32_t key_status_pub_time = 0;
 void loop()
 {
+  uint32_t loop_time = millis();
   if (chave_status_pressed && millis() - chave_time_pressed > 500)
   {
-    digitalWrite(3, HIGH);
+    digitalWrite(4, HIGH);
     chave_status_pressed = false;
   }
+
+  if (nh.connected() && loop_time - key_status_pub_time > 1000)
+  {
+   key_status_pub_time = loop_time;
+    chave_status_msg.data = !digitalRead(3);
+   chave_status_pub.publish(&chave_status_msg);
+  }
+
   // Checa se a placa NAO está conectada ao ROS (rosserial na Jetson)
   if (!nh.connected())
   {

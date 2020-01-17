@@ -1,9 +1,7 @@
 #include <ros.h>
-#include <std_msgs/UInt16.h>
-#include <geometry_msgs/Twist.h>
 #include <nav_msgs/Odometry.h>
 #include <std_msgs/Empty.h>
-#include <std_msgs/Bool.h>
+#include <synkar_msgs/BaseStatus.h>
 //#include <std_srvs/Empty.h>
 //#include <std_srvs/Trigger.h>
 //#include <synkar_base_controller/BatStatus.h>
@@ -59,11 +57,10 @@ void callback2(const BaseReceiver &msg)
 }
 void time_spin()
 {
-  long int time1_current = millis();
-  active_status_1 = ((time1_current - time1_last) < TIME_THRESHOLD);
+  uint32_t time_current = millis();
+  active_status_1 = ((time_current - time1_last) < TIME_THRESHOLD);
 
-  unsigned long time2_current = millis();
-  active_status_2 = ((time2_current - time2_last) < TIME_THRESHOLD);
+  active_status_2 = ((time_current - time2_last) < TIME_THRESHOLD);
 }
 
 BaseTransmitter baseTx1(Serial2);
@@ -173,8 +170,8 @@ void chave_cb(const std_msgs::Empty &msg)
   chave_time_pressed = millis();
 }
 ros::Subscriber<std_msgs::Empty> chave_sub("key_activate", &chave_cb);
-std_msgs::Bool chave_status_msg;
-ros::Publisher chave_status_pub("key_status", &chave_status_msg);
+synkar_msgs::BaseStatus status_msg;
+ros::Publisher status_pub("status", &status_msg);
 /*void chave_cb(const std_srvs::Empty::Request &req, std_srvs::Empty::Response &res)
 {
   digitalWrite(4, LOW);
@@ -219,7 +216,7 @@ void setup()
   //nh.subscribe(cmd_vel_sub);
   //nh.subscribe(chave_sub);
   nh.advertise(odometry_msg_pub);
-  nh.advertise(chave_status_pub);
+  nh.advertise(status_pub);
   nh.subscribe(cmd_vel_sub);
   nh.subscribe(chave_sub);
   // nh.advertise(bat_vel_pub);
@@ -245,9 +242,16 @@ void loop()
 
   if (nh.connected() && loop_time - key_status_pub_time > 1000)
   {
-   key_status_pub_time = loop_time;
-    chave_status_msg.data = !digitalRead(3);
-   chave_status_pub.publish(&chave_status_msg);
+    key_status_pub_time = loop_time;
+    status_msg.conteiner_locked = !digitalRead(3);
+    status_msg.battery_voltage = battery_voltage;
+    status_msg.hoverboard_rear_active = active_status_1;
+    status_msg.hoverboard_rear_fail_msgs = baseRx1.receive_fail_msgs;
+    status_msg.hoverboard_rear_success_msgs = baseRx1.receive_success_msgs;
+    status_msg.hoverboard_front_active = active_status_2;
+    status_msg.hoverboard_front_fail_msgs = baseRx2.receive_fail_msgs;
+    status_msg.hoverboard_front_success_msgs = baseRx2.receive_success_msgs;
+    status_pub.publish(&status_msg);
   }
 
   // Checa se a placa NAO está conectada ao ROS (rosserial na Jetson)

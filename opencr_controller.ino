@@ -2,6 +2,7 @@
 #include <nav_msgs/Odometry.h>
 #include <std_msgs/Empty.h>
 #include <synkar_msgs/BaseStatus.h>
+//#include "synkar_msgs/BaseStatus.h"
 //#include <std_srvs/Empty.h>
 //#include <std_srvs/Trigger.h>
 //#include <synkar_base_controller/BatStatus.h>
@@ -163,15 +164,18 @@ void setOdomMsgCovariance(float *cov, float diagonal_value)
 uint32_t chave_time_pressed = 0;
 bool chave_status_pressed = false;
 
+
 void chave_cb(const std_msgs::Empty &msg)
 {
-  digitalWrite(4, LOW);
+  //digitalWrite(4, LOW);
   chave_status_pressed = true;
   chave_time_pressed = millis();
 }
+
 ros::Subscriber<std_msgs::Empty> chave_sub("key_activate", &chave_cb);
 synkar_msgs::BaseStatus status_msg;
 ros::Publisher status_pub("status", &status_msg);
+
 /*void chave_cb(const std_srvs::Empty::Request &req, std_srvs::Empty::Response &res)
 {
   digitalWrite(4, LOW);
@@ -202,6 +206,12 @@ void setup()
   Serial.begin(115200);
   Serial3.begin(57600);
   Serial2.begin(57600);
+
+
+  Serial1.begin(115200); // Serial conectada ao Arduino com a chave eletrica
+  pinMode(19, INPUT_PULLUP);  
+  //digitalWrite(19, HIGH);
+  
   delay(1000);
   baseTx1.left_velocity = 0.0;
   baseTx1.right_velocity = 0.0;
@@ -231,19 +241,77 @@ void setup()
 int cout = 0;
 float time_last_connect = 0;
 uint32_t key_status_pub_time = 0;
+uint32_t container_status_get_time = 0;
+bool conteiner_locked = 0;
+
+
 void loop()
 {
   uint32_t loop_time = millis();
+  
   if (chave_status_pressed && millis() - chave_time_pressed > 500)
   {
-    digitalWrite(4, HIGH);
+    // Envia comando, pela Serial, para acionar a chave
+    Serial1.write("l");
+    
+    //digitalWrite(4, HIGH);
     chave_status_pressed = false;
+  
+    nh.logwarn("CHAVE ACIONADA!");
   }
 
+  if (nh.connected() && loop_time - container_status_get_time > 1500)
+  {
+    container_status_get_time = loop_time;
+    
+    // Obtem o status da trava (se aberta ou fechada), via porta serial
+    if (Serial1.available() > 0) 
+    {
+      char c = -1;
+      // Limpa o buffer, e pega o ultimo valor
+      while (Serial1.available() > 0)
+      {
+        c = Serial1.read();
+      }
+      
+      //int msg = Serial1.read();
+
+      //char mystr[10]; //Initialized variable to store recieved data
+      //Serial1.readBytes(mystr, 1); //Read the serial data and store in var
+      //mystr[1] = '\0';
+      //char c = Serial1.read();
+
+      //if (mystr[0] == "F")
+      if (c == '0')
+      {
+        nh.logwarn("TRAVA FECHADA");
+        
+        conteiner_locked = 0;
+      }
+      //else if (mystr[0] == "A")
+      else if (c == '1')
+      {
+        nh.logwarn("TRAVA ABERTA");
+
+        conteiner_locked = 1;
+      }
+      
+      //nh.logwarn("DADO RECEBIDO =");
+      //nh.logwarn(mystr);
+      //nh.logwarn(c);
+      
+    }
+  }
+
+  // Publica a mensagem do topico status
   if (nh.connected() && loop_time - key_status_pub_time > 1000)
   {
     key_status_pub_time = loop_time;
-    status_msg.conteiner_locked = !digitalRead(3);
+    
+    //status_msg.conteiner_locked = !digitalRead(3);
+    status_msg.conteiner_locked = !conteiner_locked;
+    //status_msg.conteiner_locked = 1;
+    
     status_msg.battery_voltage = battery_voltage;
     status_msg.hoverboard_rear_active = active_status_1;
     status_msg.hoverboard_rear_fail_msgs = baseRx1.receive_fail_msgs;
